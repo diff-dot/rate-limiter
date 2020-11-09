@@ -6,7 +6,6 @@ const REDIS_KEY_PREFIX = 'rate:';
 
 export class RateLimiter {
   private redisOptions: RedisHostOptions | RedisClusterOptions;
-  private redisKey: string;
 
   private action: string;
   private period: number;
@@ -17,14 +16,13 @@ export class RateLimiter {
    *
    * @param {RedisHostOptions|RedisClusterOptions} args.redisOptions 사용량을 기록할 레디스 서버 옵션
    * @param {number} args.action 사용량을 측정할 액션
-   * @param {number} args.period 사용량 리셋 주기
+   * @param {number} args.period 사용량 집계 주기
    * @param {number} args.limit 지정된(args.period) 시간동안 호출할 수 있는 최대 횟수
    */
   constructor(args: { redisOptions: RedisHostOptions | RedisClusterOptions; action: string; period: number; limit: number }) {
     const { redisOptions, action, period, limit } = args;
 
     this.redisOptions = redisOptions;
-    this.redisKey = REDIS_KEY_PREFIX + action;
 
     this.action = action;
     this.period = period;
@@ -36,8 +34,9 @@ export class RateLimiter {
    * @param usage 사용량
    * @returns {Promise} currentUsage: 현재 사용량, exceed: 사용량 초과 유무
    */
-  async consume(usage: number = 1): Promise<{ currentUsage: number; exceed: boolean }> {
-    const [exceed, currentUsage] = await this.redisClient.consume(this.redisKey, usage, this.period, this.limit);
+  public async consume(usage: number = 1): Promise<{ currentUsage: number; exceed: boolean }> {
+    const { key, ttl } = this.step;
+    const [exceed, currentUsage] = await this.redisClient.consume(key, usage, this.period, this.limit, ttl);
 
     return {
       currentUsage,
@@ -48,16 +47,34 @@ export class RateLimiter {
   /**
    * 사용량 리셋
    */
-  async reset(): Promise<void> {
-    await this.redisClient.del(this.redisKey);
+  public async reset(): Promise<void> {
+    await this.redisClient.del(this.step.key);
   }
 
   /**
    * 사용량 조회
    */
-  async usage(): Promise<number> {
-    const currentUsage = await this.redisClient.get(this.redisKey);
+  public async usage(): Promise<number> {
+    const currentUsage = await this.redisClient.get(this.step.key);
     return currentUsage === null ? 0 : parseInt(currentUsage);
+  }
+
+  /**
+   * 사용량 리셋까지 남은 시간
+   */
+  public async leftUntilReset(): Promise<number> {
+    return this.step.ttl;
+  }
+
+  /**
+   * 집계 주기별로 사용량을 기록할 레디스 key 와 해당키의 남은 ttl 을 반환
+   */
+  private get step(): { key: string; ttl: number } {
+    const now = Math.floor(Date.now() / 1000);
+    const step = Math.floor(now / this.period);
+    const ttl = this.period - (now % this.period);
+
+    return { key: REDIS_KEY_PREFIX + this.action + ':' + step, ttl };
   }
 
   private get redisClient(): Redis | Cluster {

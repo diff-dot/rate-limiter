@@ -14,8 +14,20 @@ const redisOptions: RedisHostOptions = {
 const rateLimiter = new RateLimiter({ redisOptions, action, period, limit });
 let lastUsage: number = 0;
 
+async function sleep(duration: number) {
+  await new Promise(resolve => {
+    setTimeout(() => {
+      resolve();
+    }, duration * 1000);
+  });
+}
+
 describe('check-limit', async () => {
   before(async () => {
+    // 새로운 리셋주기
+    const leftUntilNewPeriod = period - (Math.floor(Date.now() / 1000) % period);
+    await sleep(leftUntilNewPeriod);
+
     await rateLimiter.reset();
   });
 
@@ -46,12 +58,8 @@ describe('check-limit', async () => {
     expect(currentUsage).to.be.eq(limit);
   });
 
-  it('허용량 한도 도달 후 지정된 측정 시간을 지나면 사용량 리셋', async () => {
-    await new Promise(resolve => {
-      setTimeout(() => {
-        resolve();
-      }, period * 1000);
-    });
+  it('허용량 한도 도달 후 새로운 집계 주기가 도래하면 사용량 리셋', async () => {
+    await sleep(period);
 
     const usage = await rateLimiter.usage();
     expect(usage).to.be.eq(0);
