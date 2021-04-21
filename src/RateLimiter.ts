@@ -32,15 +32,18 @@ export class RateLimiter {
   /**
    * 소비
    * @param usage 사용량
-   * @returns {Promise} currentUsage: 현재 사용량, exceed: 사용량 초과 유무
+   * @returns {Promise} currentUsage: 현재 사용량
+   *                    exceed: 사용량 초과 유무
+   *                    resetIn: 사용량 초기화까지 남은 시간
    */
-  public async consume(usage: number = 1): Promise<{ currentUsage: number; exceed: boolean }> {
+  public async consume(usage: number = 1): Promise<{ currentUsage: number; exceed: boolean; resetIn: number }> {
     const { key, ttl } = this.step;
     const [exceed, currentUsage] = await this.redisClient.consume(key, usage, this.period, this.limit, ttl);
 
     return {
       currentUsage,
-      exceed: exceed === 1
+      exceed: exceed === 1,
+      resetIn: ttl
     };
   }
 
